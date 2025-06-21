@@ -8,20 +8,6 @@ import ffmpeg
 import base64
 from io import BytesIO
 from PIL import Image
-import gc
-import os, psutil
-import uuid
-def save_image_and_get_url(img_array, folder="static/frames"):
-    os.makedirs(folder, exist_ok=True)
-    filename = f"{uuid.uuid4().hex}.png"
-    path = os.path.join(folder, filename)
-    Image.fromarray(cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB)).save(path)
-    return f"/static/frames/{filename}"
-
-def log_memory(tag=""):
-    process = psutil.Process(os.getpid())
-    mem = process.memory_info().rss / (1024 * 1024)  # MB
-    print(f"[MEMORY] {tag}: {mem:.2f} MB")
 
 mp_pose = mp.solutions.pose
 NAME_MAP = {
@@ -75,7 +61,6 @@ def extract_pose_frames(video_path):
             frame = cv2.rotate(frame, cv2.ROTATE_180)
         elif rotation == 270:
             frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
-        frame = cv2.resize(frame, (320, 240))  # Downscale to reduce memory
         frames.append(frame)
     cap.release()
     return frames
@@ -161,12 +146,14 @@ def generate_overlay_frames(user_frames, pro_frames):
     max_width = max(f.shape[1] for f in user_frames + pro_frames)
     canvas_size = max(max_height, max_width) + 200
 
-    overlay_images_urls = []
+    # Ensure directory exists
+    output_dir = os.path.join("static", "frames")
+    os.makedirs(output_dir, exist_ok=True)
+
+    overlay_images_paths = []
 
     with mp_pose.Pose(static_image_mode=True) as pose_model:
         for i in range(len(user_frames)):
-            if i % 10 == 0:
-                gc.collect()
             user_frame = user_frames[i]
             pro_frame = pro_frames[i]
             blank = np.zeros((canvas_size, canvas_size, 3), dtype=np.uint8)
@@ -213,11 +200,12 @@ def generate_overlay_frames(user_frames, pro_frames):
                     cv2.circle(blank, start, 8, (0, 255, 0), -1)
                     cv2.circle(blank, end, 8, (0, 255, 0), -1)
 
-            # Save frame as image and get URL
-            overlay_images_urls.append(save_image_and_get_url(blank))
-            del user_frame, pro_frame  # Free memory
+            filename = f"overlay_frame_{i}.png"
+            path = os.path.join(output_dir, filename)
+            cv2.imwrite(path, blank)
+            overlay_images_paths.append(f"/static/frames/{filename}")
 
-    return overlay_images_urls
+    return overlay_images_paths
 
 def frame_viewer(user_frames, pro_frames, similarity_score, pro_name):
     i = 0
@@ -254,17 +242,23 @@ def frame_viewer(user_frames, pro_frames, similarity_score, pro_name):
 
 
 def run_analysis(user_video_path):
+    import glob
     with open("pro_pose_db.pkl", "rb") as f:
         pose_db = pickle.load(f)
 
     user_frames = extract_pose_frames(user_video_path)
-    del user_video_path  # Free video path reference
-    log_memory("after extracting user frames")
-    gc.collect()  # Explicitly collect garbage
     user_frames = resample_vectors(user_frames, 60)
-    log_memory("after resampling user frames")
     best_pro, similarity = find_closest_pro(user_frames, pose_db)
-    log_memory("after finding closest pro")
+
+    # Ensure directory exists
+    output_dir = os.path.join("static", "frames")
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Clear out old frames
+    FRAME_DIR = output_dir
+    frame_files = glob.glob(os.path.join(FRAME_DIR, '*.png'))
+    for f in frame_files:
+        os.remove(f)
 
     # Overlay stick figures
     with mp_pose.Pose(static_image_mode=True) as pose_model:
@@ -289,22 +283,21 @@ def run_analysis(user_video_path):
                     cv2.circle(overlay, (x2, y2), 6, (0, 0, 255), -1)
 
             overlaid_frames.append(overlay)
-            log_memory(f"added overlaid frame {len(overlaid_frames)}")
 
-    # Save user frames as images and get URLs
-    frame_paths = [save_image_and_get_url(frame) for frame in overlaid_frames]
-
-    del overlaid_frames
-    log_memory("after deleting overlaid_frames")
-    gc.collect()
+    # Save user frames as PNG and collect paths
+    frames = []
+    for i, frame in enumerate(overlaid_frames):
+        filename = f"user_frame_{i}.png"
+        path = os.path.join(output_dir, filename)
+        cv2.imwrite(path, frame)
+        frames.append(f"/static/frames/{filename}")
 
     # Also process pro swing frames
-    pro_frames = extract_pose_frames(best_pro["video_path"])
-    pro_frames = resample_vectors(pro_frames, 60)
-    log_memory("after resampling pro frames")
+    pro_frames_raw = extract_pose_frames(best_pro["video_path"])
+    pro_frames_raw = resample_vectors(pro_frames_raw, 60)
     with mp_pose.Pose(static_image_mode=True) as pose_model:
         pro_overlaid = []
-        for f in pro_frames:
+        for f in pro_frames_raw:
             f_rgb = cv2.cvtColor(f, cv2.COLOR_BGR2RGB)
             results = pose_model.process(f_rgb)
             overlay = np.zeros_like(f)
@@ -322,23 +315,21 @@ def run_analysis(user_video_path):
                     cv2.circle(overlay, (x1, y1), 6, (0, 255, 0), -1)
                     cv2.circle(overlay, (x2, y2), 6, (0, 255, 0), -1)
             pro_overlaid.append(overlay)
-            log_memory(f"added pro overlaid frame {len(pro_overlaid)}")
 
-    # Save pro frames as images and get URLs
-    pro_frame_paths = [save_image_and_get_url(frame) for frame in pro_overlaid]
+    # Save pro frames as PNG and collect paths
+    pro_frame_paths = []
+    for i, frame in enumerate(pro_overlaid):
+        filename = f"pro_frame_{i}.png"
+        path = os.path.join(output_dir, filename)
+        cv2.imwrite(path, frame)
+        pro_frame_paths.append(f"/static/frames/{filename}")
 
-    # No explicit deletion of pro_overlaid in original code; if needed:
-    # del pro_overlaid
-    # log_memory("after deleting pro_overlaid")
-
-    overlay_frame_paths = generate_overlay_frames(user_frames, pro_frames)
-    del user_frames, pro_frames  # Free up major memory lists
-    gc.collect()
+    overlay_frame_paths = generate_overlay_frames(user_frames, pro_frames_raw)
 
     return {
         "match": best_pro["name"],
         "similarity": similarity,
-        "frames": frame_paths,
+        "frames": frames,
         "pro_frames": pro_frame_paths,
         "overlay_frames": overlay_frame_paths
     }

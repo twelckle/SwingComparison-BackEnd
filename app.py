@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 import os
 import poseExtraction  # 🔁 Your main analyzer logic
 from flask_cors import CORS
+import shutil
 
 app = Flask(
     __name__,
@@ -16,6 +17,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 def analyze():
     if "video" not in request.files:
         return jsonify({"error": "No file uploaded"}), 400
+
 
     file = request.files["video"]
     save_path = os.path.join(UPLOAD_FOLDER, "MySwing.mp4")
@@ -36,5 +38,9 @@ def analyze():
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(debug=False, host="0.0.0.0", port=port)
+    # Local development port
+    app.run(debug=False, host="127.0.0.1", port=5000)
+
+    # For Render or external hosting, uncomment the following:
+    # port = int(os.environ.get("PORT", 5000))
+    # app.run(debug=False, host="0.0.0.0", port=port)
