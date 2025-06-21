@@ -9,6 +9,12 @@ import base64
 from io import BytesIO
 from PIL import Image
 import gc
+import os, psutil
+
+def log_memory(tag=""):
+    process = psutil.Process(os.getpid())
+    mem = process.memory_info().rss / (1024 * 1024)  # MB
+    print(f"[MEMORY] {tag}: {mem:.2f} MB")
 
 mp_pose = mp.solutions.pose
 NAME_MAP = {
@@ -248,9 +254,12 @@ def run_analysis(user_video_path):
         pose_db = pickle.load(f)
 
     user_frames = extract_pose_frames(user_video_path)
+    log_memory("after extracting user frames")
     gc.collect()  # Explicitly collect garbage
     user_frames = resample_vectors(user_frames, 60)
+    log_memory("after resampling user frames")
     best_pro, similarity = find_closest_pro(user_frames, pose_db)
+    log_memory("after finding closest pro")
 
     # Overlay stick figures
     with mp_pose.Pose(static_image_mode=True) as pose_model:
@@ -275,6 +284,7 @@ def run_analysis(user_video_path):
                     cv2.circle(overlay, (x2, y2), 6, (0, 0, 255), -1)
 
             overlaid_frames.append(overlay)
+            log_memory(f"added overlaid frame {len(overlaid_frames)}")
 
     # Encode user frames as base64
     frame_paths = []
@@ -287,11 +297,13 @@ def run_analysis(user_video_path):
         del frame, pil_img, buf
 
     del overlaid_frames
+    log_memory("after deleting overlaid_frames")
     gc.collect()
 
     # Also process pro swing frames
     pro_frames = extract_pose_frames(best_pro["video_path"])
     pro_frames = resample_vectors(pro_frames, 60)
+    log_memory("after resampling pro frames")
     with mp_pose.Pose(static_image_mode=True) as pose_model:
         pro_overlaid = []
         for f in pro_frames:
@@ -312,6 +324,7 @@ def run_analysis(user_video_path):
                     cv2.circle(overlay, (x1, y1), 6, (0, 255, 0), -1)
                     cv2.circle(overlay, (x2, y2), 6, (0, 255, 0), -1)
             pro_overlaid.append(overlay)
+            log_memory(f"added pro overlaid frame {len(pro_overlaid)}")
 
     # Encode pro frames as base64
     pro_frame_paths = []
@@ -322,6 +335,10 @@ def run_analysis(user_video_path):
         base64_img = base64.b64encode(buf.getvalue()).decode('utf-8')
         pro_frame_paths.append(f"data:image/png;base64,{base64_img}")
         del frame, pil_img, buf
+
+    # No explicit deletion of pro_overlaid in original code; if needed:
+    # del pro_overlaid
+    # log_memory("after deleting pro_overlaid")
 
     overlay_frame_paths = generate_overlay_frames(user_frames, pro_frames)
 
