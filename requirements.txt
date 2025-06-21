@@ -5,3 +5,4 @@ opencv-python
 numpy
 scipy
 ffmpeg-python
+psutil==5.9.8
