@@ -158,6 +158,8 @@ def generate_overlay_frames(user_frames, pro_frames):
 
     with mp_pose.Pose(static_image_mode=True) as pose_model:
         for i in range(len(user_frames)):
+            if i % 10 == 0:
+                gc.collect()
             user_frame = user_frames[i]
             pro_frame = pro_frames[i]
             blank = np.zeros((canvas_size, canvas_size, 3), dtype=np.uint8)
@@ -254,6 +256,7 @@ def run_analysis(user_video_path):
         pose_db = pickle.load(f)
 
     user_frames = extract_pose_frames(user_video_path)
+    del user_video_path  # Free video path reference
     log_memory("after extracting user frames")
     gc.collect()  # Explicitly collect garbage
     user_frames = resample_vectors(user_frames, 60)
@@ -290,11 +293,11 @@ def run_analysis(user_video_path):
     frame_paths = []
     for frame in overlaid_frames:
         pil_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        buf = BytesIO()
-        pil_img.save(buf, format="PNG")
-        base64_img = base64.b64encode(buf.getvalue()).decode('utf-8')
-        frame_paths.append(f"data:image/png;base64,{base64_img}")
-        del frame, pil_img, buf
+        with BytesIO() as buf:
+            pil_img.save(buf, format="PNG")
+            base64_img = base64.b64encode(buf.getvalue()).decode('utf-8')
+            frame_paths.append(f"data:image/png;base64,{base64_img}")
+        del frame, pil_img
 
     del overlaid_frames
     log_memory("after deleting overlaid_frames")
@@ -335,12 +338,15 @@ def run_analysis(user_video_path):
         base64_img = base64.b64encode(buf.getvalue()).decode('utf-8')
         pro_frame_paths.append(f"data:image/png;base64,{base64_img}")
         del frame, pil_img, buf
+        del base64_img
 
     # No explicit deletion of pro_overlaid in original code; if needed:
     # del pro_overlaid
     # log_memory("after deleting pro_overlaid")
 
     overlay_frame_paths = generate_overlay_frames(user_frames, pro_frames)
+    del user_frames, pro_frames  # Free up major memory lists
+    gc.collect()
 
     return {
         "match": best_pro["name"],
