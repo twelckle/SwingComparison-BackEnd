@@ -61,6 +61,7 @@ def extract_pose_frames(video_path):
             frame = cv2.rotate(frame, cv2.ROTATE_180)
         elif rotation == 270:
             frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        frame = cv2.resize(frame, (640, 480))  # Downscale to reduce memory
         frames.append(frame)
     cap.release()
     return frames
