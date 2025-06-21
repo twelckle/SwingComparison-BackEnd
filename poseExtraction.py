@@ -10,6 +10,13 @@ from io import BytesIO
 from PIL import Image
 import gc
 import os, psutil
+import uuid
+def save_image_and_get_url(img_array, folder="static/frames"):
+    os.makedirs(folder, exist_ok=True)
+    filename = f"{uuid.uuid4().hex}.png"
+    path = os.path.join(folder, filename)
+    Image.fromarray(cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB)).save(path)
+    return f"/static/frames/{filename}"
 
 def log_memory(tag=""):
     process = psutil.Process(os.getpid())
@@ -154,7 +161,7 @@ def generate_overlay_frames(user_frames, pro_frames):
     max_width = max(f.shape[1] for f in user_frames + pro_frames)
     canvas_size = max(max_height, max_width) + 200
 
-    overlay_images_base64 = []
+    overlay_images_urls = []
 
     with mp_pose.Pose(static_image_mode=True) as pose_model:
         for i in range(len(user_frames)):
@@ -206,16 +213,11 @@ def generate_overlay_frames(user_frames, pro_frames):
                     cv2.circle(blank, start, 8, (0, 255, 0), -1)
                     cv2.circle(blank, end, 8, (0, 255, 0), -1)
 
-            # Encode frame to base64
-            pil_img = Image.fromarray(cv2.cvtColor(blank, cv2.COLOR_BGR2RGB))
-            buf = BytesIO()
-            pil_img.save(buf, format="PNG")
-            base64_img = base64.b64encode(buf.getvalue()).decode('utf-8')
-            overlay_images_base64.append(f"data:image/png;base64,{base64_img}")
-            del pil_img, buf
+            # Save frame as image and get URL
+            overlay_images_urls.append(save_image_and_get_url(blank))
             del user_frame, pro_frame  # Free memory
 
-    return overlay_images_base64
+    return overlay_images_urls
 
 def frame_viewer(user_frames, pro_frames, similarity_score, pro_name):
     i = 0
@@ -289,15 +291,8 @@ def run_analysis(user_video_path):
             overlaid_frames.append(overlay)
             log_memory(f"added overlaid frame {len(overlaid_frames)}")
 
-    # Encode user frames as base64
-    frame_paths = []
-    for frame in overlaid_frames:
-        pil_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        with BytesIO() as buf:
-            pil_img.save(buf, format="PNG")
-            base64_img = base64.b64encode(buf.getvalue()).decode('utf-8')
-            frame_paths.append(f"data:image/png;base64,{base64_img}")
-        del frame, pil_img
+    # Save user frames as images and get URLs
+    frame_paths = [save_image_and_get_url(frame) for frame in overlaid_frames]
 
     del overlaid_frames
     log_memory("after deleting overlaid_frames")
@@ -329,16 +324,8 @@ def run_analysis(user_video_path):
             pro_overlaid.append(overlay)
             log_memory(f"added pro overlaid frame {len(pro_overlaid)}")
 
-    # Encode pro frames as base64
-    pro_frame_paths = []
-    for frame in pro_overlaid:
-        pil_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        buf = BytesIO()
-        pil_img.save(buf, format="PNG")
-        base64_img = base64.b64encode(buf.getvalue()).decode('utf-8')
-        pro_frame_paths.append(f"data:image/png;base64,{base64_img}")
-        del frame, pil_img, buf
-        del base64_img
+    # Save pro frames as images and get URLs
+    pro_frame_paths = [save_image_and_get_url(frame) for frame in pro_overlaid]
 
     # No explicit deletion of pro_overlaid in original code; if needed:
     # del pro_overlaid
