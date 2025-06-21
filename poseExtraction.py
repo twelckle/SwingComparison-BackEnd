@@ -8,6 +8,7 @@ import ffmpeg
 import base64
 from io import BytesIO
 from PIL import Image
+import gc
 
 mp_pose = mp.solutions.pose
 NAME_MAP = {
@@ -61,7 +62,7 @@ def extract_pose_frames(video_path):
             frame = cv2.rotate(frame, cv2.ROTATE_180)
         elif rotation == 270:
             frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
-        frame = cv2.resize(frame, (640, 480))  # Downscale to reduce memory
+        frame = cv2.resize(frame, (320, 240))  # Downscale to reduce memory
         frames.append(frame)
     cap.release()
     return frames
@@ -203,6 +204,8 @@ def generate_overlay_frames(user_frames, pro_frames):
             pil_img.save(buf, format="PNG")
             base64_img = base64.b64encode(buf.getvalue()).decode('utf-8')
             overlay_images_base64.append(f"data:image/png;base64,{base64_img}")
+            del pil_img, buf
+            del user_frame, pro_frame  # Free memory
 
     return overlay_images_base64
 
@@ -245,6 +248,7 @@ def run_analysis(user_video_path):
         pose_db = pickle.load(f)
 
     user_frames = extract_pose_frames(user_video_path)
+    gc.collect()  # Explicitly collect garbage
     user_frames = resample_vectors(user_frames, 60)
     best_pro, similarity = find_closest_pro(user_frames, pose_db)
 
@@ -280,6 +284,10 @@ def run_analysis(user_video_path):
         pil_img.save(buf, format="PNG")
         base64_img = base64.b64encode(buf.getvalue()).decode('utf-8')
         frame_paths.append(f"data:image/png;base64,{base64_img}")
+        del frame, pil_img, buf
+
+    del overlaid_frames
+    gc.collect()
 
     # Also process pro swing frames
     pro_frames = extract_pose_frames(best_pro["video_path"])
@@ -313,6 +321,7 @@ def run_analysis(user_video_path):
         pil_img.save(buf, format="PNG")
         base64_img = base64.b64encode(buf.getvalue()).decode('utf-8')
         pro_frame_paths.append(f"data:image/png;base64,{base64_img}")
+        del frame, pil_img, buf
 
     overlay_frame_paths = generate_overlay_frames(user_frames, pro_frames)
 
