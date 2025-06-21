@@ -243,12 +243,16 @@ def frame_viewer(user_frames, pro_frames, similarity_score, pro_name):
 
 def run_analysis(user_video_path):
     import glob
+    import gc
     with open("pro_pose_db.pkl", "rb") as f:
         pose_db = pickle.load(f)
 
     user_frames = extract_pose_frames(user_video_path)
     user_frames = resample_vectors(user_frames, 60)
     best_pro, similarity = find_closest_pro(user_frames, pose_db)
+
+    del pose_db
+    gc.collect()
 
     # Ensure directory exists
     output_dir = os.path.join("static", "frames")
@@ -260,10 +264,9 @@ def run_analysis(user_video_path):
     for f in frame_files:
         os.remove(f)
 
-    # Overlay stick figures
+    frames = []
     with mp_pose.Pose(static_image_mode=True) as pose_model:
-        overlaid_frames = []
-        for frame in user_frames:
+        for i, frame in enumerate(user_frames):
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             results = pose_model.process(frame_rgb)
             overlay = np.zeros_like(frame)
@@ -282,15 +285,13 @@ def run_analysis(user_video_path):
                     cv2.circle(overlay, (x1, y1), 6, (0, 0, 255), -1)
                     cv2.circle(overlay, (x2, y2), 6, (0, 0, 255), -1)
 
-            overlaid_frames.append(overlay)
+            filename = f"user_frame_{i}.png"
+            path = os.path.join(output_dir, filename)
+            cv2.imwrite(path, overlay)
+            frames.append(f"/static/frames/{filename}")
 
-    # Save user frames as PNG and collect paths
-    frames = []
-    for i, frame in enumerate(overlaid_frames):
-        filename = f"user_frame_{i}.png"
-        path = os.path.join(output_dir, filename)
-        cv2.imwrite(path, frame)
-        frames.append(f"/static/frames/{filename}")
+    del user_frames
+    gc.collect()
 
     # Also process pro swing frames
     pro_frames_raw = extract_pose_frames(best_pro["video_path"])
@@ -316,6 +317,10 @@ def run_analysis(user_video_path):
                     cv2.circle(overlay, (x2, y2), 6, (0, 255, 0), -1)
             pro_overlaid.append(overlay)
 
+    del pro_frames_raw
+    del pro_overlaid
+    gc.collect()
+
     # Save pro frames as PNG and collect paths
     pro_frame_paths = []
     for i, frame in enumerate(pro_overlaid):
@@ -325,6 +330,8 @@ def run_analysis(user_video_path):
         pro_frame_paths.append(f"/static/frames/{filename}")
 
     overlay_frame_paths = generate_overlay_frames(user_frames, pro_frames_raw)
+
+    gc.collect()
 
     return {
         "match": best_pro["name"],
